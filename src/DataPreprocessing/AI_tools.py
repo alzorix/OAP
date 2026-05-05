@@ -12,18 +12,17 @@ from tqdm import tqdm
 # Константы
 EMOTION_VALENCE = {
     "anger": -1,
-    "contempt": -1,
-    "disgust": -1,
-    "fear": -1,
-    "frustration": -1,
-    "sadness": -1,
-    "neutral": 0,
-    "gratitude": 1,
-    "joy": 1,
-    "love": 1,
-    "surprise": 1
+    "contempt": -0.6,
+    "disgust": -0.8,
+    "fear": -0.7,
+    "frustration": -0.5,
+    "sadness": -0.7,
+    "neutral": 0.0,
+    "gratitude": 0.6,
+    "joy": 0.9,
+    "love": 1.0,
+    "surprise": 0.0
 }
-
 BATCH_SIZE = None
 def setup_device():
     global BATCH_SIZE
@@ -91,10 +90,15 @@ def classify_emotion_batch_edition(texts: list[str],batch_size: int = BATCH_SIZE
         batch_size = BATCH_SIZE
 
     clean_texts = [t if isinstance(t, str) and t else " " for t in texts]
-    dataset = Dataset.from_dict({"text": clean_texts}) #
+    dataset = Dataset.from_dict({"text": clean_texts})
 
-    results = classifier(KeyDataset(dataset, "text"), batch_size=batch_size)
-    return [EMOTION_VALENCE.get(r['label'], 0) for r in tqdm(results, total=len(clean_texts), desc="Анализ эмоциональной окраски текста")]
+    def _results_generator():
+        """Генератор: поштучно отдаёт оценку для каждого результата из pipeline."""
+        pipeline_iter = classifier(KeyDataset(dataset, "text"), batch_size=batch_size)
+        for r in tqdm(pipeline_iter, total=len(clean_texts), desc="Анализ эмоциональной окраски текста"):
+            yield EMOTION_VALENCE.get(r['label'], 0)
+
+    return list(_results_generator())
 
 
 # Сравнение скорости
