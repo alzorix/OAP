@@ -33,29 +33,35 @@ logger = logging.getLogger(__name__)
 message_queue = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
 
 
+async def message_generator(client, channel, start_date, end_date):
+    """Генератор сообщений для одного канала"""
+    msg_counter = 0
+    async for msg in client.iter_messages(channel, offset_date=end_date + timedelta(seconds=1)):
+        if msg.date < start_date:
+            break
+
+        if start_date <= msg.date <= end_date:
+            data = {
+                "date": msg.date.strftime("%Y-%m-%d %H:%M:%S"),
+                "text": msg.text or ""
+            }
+            msg_counter += 1
+
+            if msg_counter % MESSAGES_PER_BATCH == 0:
+                logger.debug(f" Пачка из {MESSAGES_PER_BATCH} msg. Пауза {DELAY_PER_MESSAGE_BATCH}с...")
+                await asyncio.sleep(DELAY_PER_MESSAGE_BATCH)
+
+            yield data
+
+
 async def parser(client, channels, start_date, end_date):
     """Собирает сообщения и кладёт в очередь"""
     for idx, channel in enumerate(channels, 1):
         try:
             logger.info(f" [{idx}/{len(channels)}] Канал: {channel.title}")
-            msg_counter = 0
 
-            async for msg in client.iter_messages(channel, offset_date=end_date + timedelta(seconds=1)):
-                if msg.date < start_date:
-                    break
-
-                if start_date <= msg.date <= end_date:
-                    data = {
-                        "date": msg.date.strftime("%Y-%m-%d %H:%M:%S"),
-                        "text": msg.text or ""
-                    }
-                    await message_queue.put(data)
-                    msg_counter += 1
-
-                    # Периодическая пауза
-                    if msg_counter % MESSAGES_PER_BATCH == 0:
-                        logger.debug(f" Пачка из {MESSAGES_PER_BATCH} msg. Пауза {DELAY_PER_MESSAGE_BATCH}с...")
-                        await asyncio.sleep(DELAY_PER_MESSAGE_BATCH)
+            async for data in message_generator(client, channel, start_date, end_date):
+                await message_queue.put(data)
 
             # Пауза между каналами
             await asyncio.sleep(DELAY_BETWEEN_CHANNELS)
