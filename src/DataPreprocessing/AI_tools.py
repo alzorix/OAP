@@ -23,7 +23,34 @@ EMOTION_VALENCE = {
     "love": 1.0,
     "surprise": 0.0
 }
+
+CHUNK_SIZE = 25_000
 BATCH_SIZE = None
+
+#Декараторы!!!!
+def timer(func):
+    import functools
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        elapsed = time.perf_counter() - start
+        logger.info(f"[timer] {func.__name__} выполнилась за {elapsed:.3f} с")
+        return result
+    return wrapper
+
+
+def log_call(func):
+    import functools
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        first_arg = args[0] if args else None
+        count = len(first_arg) if isinstance(first_arg, (list, str)) else "?"
+        logger.info(f"[log_call] {func.__name__} вызвана | элементов: {count}")
+        return func(*args, **kwargs)
+    return wrapper
+
+
 def setup_device():
     global BATCH_SIZE
     """Настройка устройства (CUDA или CPU)"""
@@ -44,7 +71,7 @@ def create_classifier(device):
         "text-classification",
         model="tabularisai/multilingual-emotion-classification",
         device=device,
-        truncation= True,#Автообрезка текста
+        truncation= False,#Автообрезка текста - отключена в рамках дороботки от 06.05
         max_length=512,
         dtype=torch.float16
     )
@@ -53,7 +80,8 @@ def create_classifier(device):
 device = setup_device()
 classifier = create_classifier(device)
 
-def classify_emotion(text: str, max_length=512) -> int:
+@timer
+def classify_emotion(text: str, max_length=512) -> float:
     """
     Классификация эмоциональной окраски текста.
 
@@ -62,43 +90,72 @@ def classify_emotion(text: str, max_length=512) -> int:
         max_length: Ограничение модели по длине
 
     Returns:
-        int: -1 (негативный), 0 (нейтральный), 1 (позитивный)
+        float: Совокупная тональность сообщения
     """
+
     if not text or not isinstance(text, str):
         logger.warning("Exist bad text")
         return 0
 
+    texts = list()
+    result = 0.0
     if len(text) > max_length:
-        text = text[:max_length]
+        text_gen = (text[i:i + max_length] for i in range(0, len(text), max_length)) # <--- генератор
 
-    result = classifier(text)[0]['label']
-    return EMOTION_VALENCE.get(result, 0)  # По умолчанию возвращаем 0
+        texts = list(text_gen)
+    else:
+        texts.append(text)
+
+    for text in texts:
+        count = classifier(text)[0]['label']
+        result += EMOTION_VALENCE[count]
+
+    return result
 
 
-def classify_emotion_batch_edition(texts: list[str],batch_size: int = BATCH_SIZE) -> list[int]:
+@log_call
+def classify_emotion_batch_edition(texts: list[str], batch_size: int = BATCH_SIZE, chunk_size: int = CHUNK_SIZE, max_length=512) -> list[int]:
     """
-        Классификация эмоциональной окраски текста группой
+    Классификация эмоциональной окраски текста группой.
+
+    Длинные тексты разбиваются на части по max_length символов,
+    валентности частей суммируются (как в classify_emotion).
+    Обработка идёт чанками — Dataset не нужен, MemoryError исключён.
 
     Args:
-        texts: Входные текста для анализа
-        batch_size: Количество обрабатываемого текста за один подход
+        texts: Входные тексты для анализа
+        batch_size: Кол-во текстов, обрабатываемых GPU за один проход
+        chunk_size: Кол-во sub-текстов за один вызов pipeline
+        max_length: Макс. длина одного фрагмента в символах
 
     Returns:
-        Список из int: -1 (негативный), 0 (нейтральный), 1 (позитивный)
+        Список float: суммарная тональность каждого исходного текста
     """
     if batch_size is None:
         batch_size = BATCH_SIZE
 
-    clean_texts = [t if isinstance(t, str) and t else " " for t in texts]
-    dataset = Dataset.from_dict({"text": clean_texts})
+    # Разбиваем длинные тексты, запоминаем исходный индекс
+    sub_texts: list[str] = []
+    sub_to_orig: list[int] = []
 
-    def _results_generator():
-        """Генератор: поштучно отдаёт оценку для каждого результата из pipeline."""
-        pipeline_iter = classifier(KeyDataset(dataset, "text"), batch_size=batch_size)
-        for r in tqdm(pipeline_iter, total=len(clean_texts), desc="Анализ эмоциональной окраски текста"):
-            yield EMOTION_VALENCE.get(r['label'], 0)
+    for i, text in enumerate(texts):
+        text = text if isinstance(text, str) and text.strip() else " "
+        parts = [text[j:j + max_length] for j in range(0, len(text), max_length)]
+        sub_texts.extend(parts)
+        sub_to_orig.extend([i] * len(parts))
 
-    return list(_results_generator())
+    results = [0.0] * len(texts)
+
+    with tqdm(total=len(sub_texts), desc="Анализ эмоциональной окраски текста") as progress_bar:
+        for start in range(0, len(sub_texts), chunk_size):
+            chunk = sub_texts[start: start + chunk_size]
+            chunk_origs = sub_to_orig[start: start + chunk_size]
+
+            for r, orig_idx in zip(classifier(chunk, batch_size=batch_size), chunk_origs):
+                results[orig_idx] += EMOTION_VALENCE.get(r['label'], 0.0)
+                progress_bar.update(1)
+
+    return results
 
 
 # Сравнение скорости

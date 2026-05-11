@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 message_queue = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
 
 
-async def message_generator(client, channel, start_date, end_date):
+async def message_generator(client, channel, start_date, end_date): #<--- fist generator
     """Генератор сообщений для одного канала"""
     msg_counter = 0
     async for msg in client.iter_messages(channel, offset_date=end_date + timedelta(seconds=1)):
