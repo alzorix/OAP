@@ -86,7 +86,7 @@ ax.plot(monthly_sentiment, alpha=0.4, label="Оригинал")
 ax.plot(range(window - 1, len(monthly_sentiment)), smoothed, label=f"MA-{window}", linewidth=2)
 ax.axhline(0, color="gray", linestyle="--")
 ax.set_title("Тренд тональности (скользящее среднее)")
-ax.legend()
+ax.legend()                                                                                                                                                                                                                                                                                                                                                                                                                             
 
 plt.tight_layout()
 plt.show()

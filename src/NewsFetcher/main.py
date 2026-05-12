@@ -14,7 +14,7 @@ START_DATE = datetime(2021, 1, 1, tzinfo=timezone.utc)
 END_DATE = datetime(2026, 3, 31, 23, 59, 59, tzinfo=timezone.utc)
 
 # Имя выходного файла
-CSV_FILE = "telegram_messages.csv"
+CSV_FILE = config.CSV_FILE
 
 # ЗАДЕРЖКИ
 DELAY_BETWEEN_CHANNELS = 2.0  # Пауза между каналами (сек)

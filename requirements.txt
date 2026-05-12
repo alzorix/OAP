@@ -1,0 +1,9 @@
+telethon
+socks
+transformers
+torch
+datasets
+tqdm
+pandas
+numpy
+matplotlib
